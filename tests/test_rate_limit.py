@@ -11,7 +11,7 @@ class TestIrRateLimit(unittest.TestCase):
 
     def setUp(self):
         """Set up test fixtures with mock responses and client instance."""
-        self.client = irDataClient(username="test_user", password="test_password")
+        self.client = irDataClient(access_token="some-mock-token")
         
         # Create common test fixtures
         self.mock_response_with_all_headers = TestIrRateLimit._create_mock_response(
@@ -46,7 +46,7 @@ class TestIrRateLimit(unittest.TestCase):
 
     def test_rate_limit_initialization(self):
         """Test that rate limit is initialized with defaults"""
-        client = irDataClient(username="test_user", password="test_password")
+        client = irDataClient(access_token="some-mock-token")
         self.assertIsNotNone(client.rate_limit)
         self.assertFalse(client.rate_limit.has_data)  # Should have no data initially
         self.assertEqual(client.rate_limit.limit, 0)  # Default values

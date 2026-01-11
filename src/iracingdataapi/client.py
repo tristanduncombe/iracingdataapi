@@ -122,34 +122,19 @@ class irDataClient:
                 stacklevel=2,
             )
 
-        self.access_token = None
-        self.username = None
-        self.encoded_password = None
-
-        if access_token and username and password:
-            raise AttributeError(
-                "You must supply either access token or account credentials, not both"
+        # Make sure we warn users who aren't aware of legacy auth deprecation!
+        if username or password:
+            raise ValueError(
+                "Legacy Authentication was removed as of December 2025. Please generate an iRacing OAuth token and supply it via the 'access_token' argument."
             )
 
-        if username and password:
-            self.username = username
-            self.encoded_password = self._encode_password(username, password)
+        if not access_token:
+            raise ValueError("You must supply an access token.")
 
-        if access_token:
-            self.access_token = access_token
-
-        # assume access token is valid, we'll raise later if necessary
-        self.authenticated = True if self.access_token else False
+        self.access_token = access_token
 
         # Rate limit object - self-contained with defaults
         self.rate_limit = irRateLimit()
-
-    def _encode_password(self, username: str, password: str) -> str:
-        initial_hash = hashlib.sha256(
-            (password + username.lower()).encode("utf-8")
-        ).digest()
-
-        return base64.b64encode(initial_hash).decode("utf-8")
 
     def _validate_and_return(self, klass: BaseModel, data):
         """Validate data with Pydantic and optionally convert to dict for backwards compatibility."""
@@ -160,50 +145,12 @@ class irDataClient:
         validated = TypeAdapter(klass).validate_python(data)
         return validated
 
-    def _login(self) -> str:
-        headers = {"Content-Type": "application/json"}
-        data = {"email": self.username, "password": self.encoded_password}
-
-        try:
-            r = self.session.post(
-                "https://members-ng.iracing.com/auth",
-                headers=headers,
-                json=data,
-                timeout=5.0,
-            )
-            if r.status_code == 429:
-                ratelimit_reset = r.headers.get("x-ratelimit-reset")
-                if ratelimit_reset:
-                    reset_datetime = datetime.fromtimestamp(int(ratelimit_reset))
-                    delta = (
-                        reset_datetime - datetime.now() + timedelta(milliseconds=500)
-                    )
-                    if not self.silent:
-                        print(f"Rate limited, waiting {delta.total_seconds()} seconds")
-                    if delta.total_seconds() > 0:
-                        time.sleep(delta.total_seconds())
-                return self._login()
-        except requests.Timeout:
-            raise RuntimeError("Login timed out")
-        except requests.ConnectionError:
-            raise RuntimeError("Connection error")
-        else:
-            response_data = r.json()
-            if r.status_code == 200 and response_data.get("authcode"):
-                # Update rate limit from successful login response
-                self.rate_limit.update_from_response(r)
-                self.authenticated = True
-                return "Logged in"
-            else:
-                raise RuntimeError("Error from iRacing: ", response_data)
-
     def _build_url(self, endpoint: str) -> str:
         return self.base_url + endpoint
 
     def _build_request_headers(self) -> dict:
         headers = {}
-        if self.access_token:
-            headers["Authorization"] = f"Bearer {self.access_token}"
+        headers["Authorization"] = f"Bearer {self.access_token}"
 
         return headers
 
@@ -219,19 +166,10 @@ class irDataClient:
     def _get_resource_or_link(
         self, url: str, payload: dict = None
     ) -> list[Union[Dict, str], bool]:
-        if not self.authenticated:
-            self._login()
-            return self._get_resource_or_link(url, payload=payload)
-
         r = self.session.get(url, params=payload, headers=self._build_request_headers())
 
-        if r.status_code == 401 and self.authenticated:
-            # unauthorised, likely due to a timeout, retry after a login
-            self.authenticated = False
-            if self.access_token:
-                raise AccessTokenInvalid("Access token not valid")
-
-            return self._get_resource_or_link(url, payload=payload)
+        if r.status_code == 401:
+            raise AccessTokenInvalid("Access token not valid")
 
         if r.status_code == 429:
             ratelimit_reset = r.headers.get("x-ratelimit-reset")
@@ -301,11 +239,8 @@ class irDataClient:
             return resource_obj
         r = self.session.get(resource_obj)
 
-        if r.status_code == 401 and self.authenticated:
-            # Unauthenticated, likely due to a timeout, retry after a login
-            self.authenticated = False
-            self._login()
-            return self._get_resource(endpoint, payload=payload)
+        if r.status_code == 401:
+            raise AccessTokenInvalid("Access token not valid")
 
         if r.status_code == 429:
             print("Rate limited, waiting")

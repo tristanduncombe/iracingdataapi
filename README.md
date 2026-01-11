@@ -4,9 +4,12 @@ iracing-data-api is a simple Python wrapper around the General Data API released
 
 The client allows easy access to some of the most useful endpoints of the data API.
 
-# Pre-installation
+# Legacy Authentication Deprecation
 
-Ensure that you have marked your account with iRacing for legacy authentication - accounts with 2FA will not work with the API. This is a limitation of iRacing, not this wrapper.
+As of December 2025, iRacing has removed legacy authentication (username/password). You must now use an OAuth2 access token to interact with the API.
+
+To obtain an OAuth token, you will need to register a client with iRacing. Instructions can be found here:
+[https://oauth.iracing.com/oauth2/book/client_registration.html](https://oauth.iracing.com/oauth2/book/client_registration.html)
 
 # Installation
 
@@ -14,7 +17,7 @@ Ensure that you have marked your account with iRacing for legacy authentication 
 
 # Examples
 
-## Using Oauth2 access token
+## Usage
 
 When you have acquired an Oauth2 access token from iRacing, and have ensured that token is valid, you can
 use it like so in this client:
@@ -56,7 +59,7 @@ The iRacing API implements rate limiting to prevent abuse and ensure fair usage.
 ```python
 from iracingdataapi.client import irDataClient
 
-idc = irDataClient(username=[YOUR iRACING USERNAME], password=[YOUR iRACING PASSWORD])
+idc = irDataClient(access_token=[YOUR OAUTH2 TOKEN])
 
 # Make an API call
 idc.get_cars()

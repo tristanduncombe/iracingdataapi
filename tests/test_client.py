@@ -53,54 +53,12 @@ class TestIrDataClient(unittest.TestCase):
         self.access_token_client = self.client
         # Client for tests with incomplete mock data
         self.dict_client = irDataClient(
-            username="test_user", password="test_password", use_pydantic=False
+            access_token="some-mock-token", use_pydantic=False
         )
 
     def _get_mock_data(self, filename):
         with open(f"tests/mock_return_data/{filename}", "r", encoding="utf-8") as file:
             return json.loads(file.read())
-
-    def test_encode_password(self):
-        expected_password = base64.b64encode(
-            hashlib.sha256(
-                ("test_password" + "test_user".lower()).encode("utf-8")
-            ).digest()
-        ).decode("utf-8")
-        encoded_password = self.client._encode_password("test_user", "test_password")
-        self.assertEqual(encoded_password, expected_password)
-
-    @patch("requests.Session.post")
-    def test_login_successful(self, mock_post):
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {"authcode": "mock_authcode"}
-        mock_post.return_value = mock_response
-
-        self.client._login()
-        self.assertTrue(self.client.authenticated)
-
-    @patch("requests.Session.post")
-    def test_login_rate_limited(self, mock_post):
-        mock_response = MagicMock()
-        mock_response.status_code = 429
-        mock_response.headers = {"x-ratelimit-reset": datetime.now().timestamp() + 1}
-        mock_post.side_effect = [
-            mock_response,
-            MagicMock(status_code=200, json=lambda: {"authcode": "mock_authcode"}),
-        ]
-
-        self.client._login()
-        self.assertTrue(self.client.authenticated)
-
-    @patch("requests.Session.post")
-    def test_login_failure(self, mock_post):
-        mock_response = MagicMock()
-        mock_response.status_code = 401
-        mock_response.json.return_value = {"error": "invalid_credentials"}
-        mock_post.return_value = mock_response
-
-        with self.assertRaises(RuntimeError):
-            self.client._login()
 
     def test_build_url(self):
         endpoint = "/test/endpoint"
@@ -108,26 +66,7 @@ class TestIrDataClient(unittest.TestCase):
         self.assertEqual(self.client._build_url(endpoint), expected_url)
 
     @patch("requests.Session.get")
-    @patch("requests.Session.post")
-    def test_get_resource_or_link_not_authenticated(self, mock_post, mock_get):
-        self.client.authenticated = False
-
-        mock_post.return_value = MagicMock(
-            status_code=200, json=lambda: {"authcode": "someauthcode"}
-        )
-        mock_get.return_value = MagicMock(
-            status_code=200, json=lambda: {"key": "value"}
-        )
-
-        response = self.client._get_resource_or_link(self.client.base_url)
-        self.assertTrue(self.client.authenticated)
-        self.assertEqual(response, [{"key": "value"}, False])
-
-    @patch("requests.Session.get")
-    @patch.object(irDataClient, "_login", return_value=None)
-    def test_get_resource_or_link_successful(self, mock_login, mock_get):
-        self.client.authenticated = True
-
+    def test_get_resource_or_link_successful(self, mock_get):
         mock_get.return_value = MagicMock(
             status_code=200, json=lambda: {"key": "value"}
         )
@@ -135,9 +74,7 @@ class TestIrDataClient(unittest.TestCase):
         self.assertEqual(response, [{"key": "value"}, False])
 
     @patch("requests.Session.get")
-    @patch.object(irDataClient, "_login", return_value=None)
-    def test_get_resource_or_link_link(self, mock_login, mock_get):
-        self.client.authenticated = True
+    def test_get_resource_or_link_link(self, mock_get):
         mock_get.return_value = MagicMock(
             status_code=200, json=lambda: {"link": "some_link"}
         )
@@ -146,7 +83,6 @@ class TestIrDataClient(unittest.TestCase):
 
     @patch("requests.Session.get")
     def test_get_resource_or_link_handles_429(self, mock_get):
-        self.client.authenticated = True
         mock_get.side_effect = [
             MagicMock(status_code=429),
             MagicMock(
@@ -161,7 +97,6 @@ class TestIrDataClient(unittest.TestCase):
 
     @patch("requests.Session.get")
     def test_get_resource_or_link_unhandled_error(self, mock_get):
-        self.client.authenticated = True
         mock_get.side_effect = [
             MagicMock(status_code=410),
             MagicMock(
@@ -179,7 +114,6 @@ class TestIrDataClient(unittest.TestCase):
     @patch.object(irDataClient, "_get_resource_or_link")
     @patch("requests.Session.get")
     def test_get_resource_unhandled_error(self, mock_get, mock_resource_or_link):
-        self.client.authenticated = True
         mock_resource_or_link.return_value = [{"key": "value"}, False]
         mock_get.side_effect = [
             MagicMock(
@@ -195,29 +129,17 @@ class TestIrDataClient(unittest.TestCase):
     @patch("requests.Session.get")
     @patch.object(irDataClient, "_get_resource_or_link")
     def test_get_resource_handles_401(self, mock_resource_or_link, mock_get):
-        self.client.authenticated = True
-
         mock_resource_or_link.return_value = ["a link", True]
         mock_get.side_effect = [
             MagicMock(status_code=401),
-            MagicMock(
-                status_code=200,
-                json=lambda: {"key": "value"},
-                headers={"Content-Type": "application/json"},
-            ),
         ]
 
-        with patch.object(self.client, "_login", return_value=None) as mock_login:
-            self.client.authenticated = True
-            response = self.client._get_resource("/test/endpoint")
-            mock_login.assert_called_once()
-            self.assertEqual(mock_get.call_count, 2)
-            self.assertEqual(response, {"key": "value"})
+        with self.assertRaises(AccessTokenInvalid):
+            self.client._get_resource("/test/endpoint")
 
     @patch("requests.Session.get")
     @patch.object(irDataClient, "_get_resource_or_link")
     def test_get_resource_handles_429(self, mock_resource_or_link, mock_get):
-        self.client.authenticated = True
         mock_resource_or_link.return_value = ["a link", True]
         mock_get.side_effect = [
             MagicMock(status_code=429),
@@ -538,20 +460,6 @@ class TestIrDataClient(unittest.TestCase):
             "1 validation error for irDataClient.member\ncust_id",
             str(context.exception),
         )
-
-    @patch("requests.Session.post")
-    def test_login_timeout(self, mock_post):
-        mock_post.side_effect = requests.Timeout()
-        with self.assertRaises(RuntimeError) as context:
-            self.client._login()
-        self.assertIn("Login timed out", str(context.exception))
-
-    @patch("requests.Session.post")
-    def test_login_connection_error(self, mock_post):
-        mock_post.side_effect = requests.ConnectionError()
-        with self.assertRaises(RuntimeError) as context:
-            self.client._login()
-        self.assertIn("Connection error", str(context.exception))
 
     def test_parse_csv_response_valid(self):
         # Test with well-formed CSV data
@@ -1528,16 +1436,24 @@ class TestIrDataClient(unittest.TestCase):
             "/data/series/seasons", payload=expected_payload
         )
 
-    def test_access_token_or_credentials(self):
+    def test_legacy_auth_rejected(self):
         """
-        It should not be possible to supply both credentials and an access token
+        It should not be possible to supply legacy credentials (username/password)
+        in any combination, even if access_token is provided.
         """
-        with self.assertRaises(AttributeError):
-            irDataClient(
-                username="a@user.com",
-                password="somepassword",
-                access_token="an-access-token",
-            )
+        invalid_combinations = [
+            {},
+            {"username": "user", "password": "pw"},
+            {"username": "user"},
+            {"password": "pw"},  # Specifically catching password provision
+            {"access_token": "token", "username": "user"},
+            {"access_token": "token", "password": "pw"},
+        ]
+
+        for kwargs in invalid_combinations:
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaises(ValueError):
+                    irDataClient(**kwargs)
 
     @patch("requests.Session.get")
     def test_access_token_invalid_raises(self, mock_requests_get):
